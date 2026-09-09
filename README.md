@@ -6,6 +6,9 @@
 drivers for SQL Server — by measuring both under the same workloads, on the same
 database, in the same run.**
 
+Four workloads are measured across four scenarios. Everything runs in Docker, so
+the numbers can be reproduced on another machine.
+
 ## Goal
 
 pyodbc is the long-standing ODBC driver for Python; mssql-python is Microsoft's
@@ -17,16 +20,15 @@ They get there differently: pyodbc goes through the ODBC Driver Manager and
 here is a narrow one: **for a given kind of query, how many rows or queries per
 second does each one deliver, and at what latency?**
 
-Four workloads are measured, because the answer is not the same for all of them:
-one row at a time, many rows at once, many threads at once, and writes.
+The four workloads are measured separately because the answer is not the same for
+all of them: one row at a time, many rows at once, many threads at once, and
+writes.
 
 What this is **not**: a verdict on which driver is better. Each scenario below
 states its configuration and its measurements, and says which driver came out
 better and worse **for that configuration**. Causes are deliberately not
 explained here — the open questions are collected at the end, to be raised with
 the driver maintainers.
-
-Everything runs in Docker, so the numbers can be reproduced on another machine.
 
 ## Environment
 
