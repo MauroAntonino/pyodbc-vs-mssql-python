@@ -1,0 +1,65 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-benchmark
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -C -Q 'SELECT 1'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-benchmark-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    volumes:
+      - ./sql:/sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "
+      set -e;
+      /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P 'YourStrong!Passw0rd' -C -b -i /sql/init.sql;
+      /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P 'YourStrong!Passw0rd' -C -b -i /sql/seed.sql;
+      "
+
+  benchmark:
+    build:
+      context: ./benchmark
+    container_name: python-mssql-benchmark
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./results:/results
+    environment:
+      DB_HOST: sqlserver
+      DB_PORT: 1433
+      DB_NAME: benchmark
+      DB_USER: sa
+      DB_PASSWORD: YourStrong!Passw0rd
+      BENCH_OUTPUT_DIR: /results
+      BENCH_POINT_ITERATIONS: 10000
+      BENCH_RESULT_SET_SIZES: 100,1000,10000
+      BENCH_RESULT_SET_ITERATIONS: 200
+      BENCH_WRITE_ITERATIONS: 5000
+      BENCH_WRITE_BATCH_SIZE: 1000
+      BENCH_WRITE_COMMIT_MODES: autocommit,transaction
+      BENCH_WORKER_LEVELS: 1,5,10,25,50,100
+      BENCH_CONCURRENCY_SECONDS: 5
+
+volumes:
+  mssql-data:
