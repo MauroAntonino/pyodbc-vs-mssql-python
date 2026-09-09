@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# Raw runs are machine-specific; the PNGs referenced by the README are kept.
+results/*.json
+results/*.csv
+results/nopool/
