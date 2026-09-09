@@ -1,146 +1,144 @@
 # pyodbc vs mssql-python
 
-A reproducible benchmark of the two Python drivers for SQL Server, across four
-scenarios: point lookup, result-set transport, concurrency, and writes.
+Which Python driver is faster against SQL Server? We measured it. Everything runs
+in Docker, so you can repeat it on your own machine.
 
-We built it to pick a driver for our own Python services instead of deciding on
-intuition. It is not a verdict on which driver is better — it is one environment,
-measured, with the environment recorded next to the numbers. **We are looking for
-feedback on the configuration:** if an option of ours is under-serving either
-driver, the number is wrong and we want to fix it.
+## Short answer
 
-## Run it
+| If your app... | Use | Why |
+|---|---|---|
+| runs queries in threads | **mssql-python** | 5x faster from 10 threads up |
+| reads big result sets | **mssql-python** | 1.7x faster at 10,000 rows |
+| runs small queries, one at a time | **pyodbc** | 1.5x faster per query |
+| bulk-inserts with `executemany` | **pyodbc** | 1.5x faster |
+
+The biggest single finding: **pyodbc gets slower when you add threads.** One
+thread does 5,600 queries/sec; ten threads do 1,345 — worse than one. It then
+stays flat no matter how many threads you add. mssql-python holds ~7,000
+queries/sec from 1 to 100 threads.
+
+## How to run it
+
+Start the database:
 
 ```bash
 docker compose up -d --wait sqlserver
 ```
 
+Create the table and load 100,000 rows:
+
 ```bash
 docker compose run --rm db-init
 ```
+
+Run the benchmark:
 
 ```bash
 docker compose run --rm --no-deps benchmark --repeat 3
 ```
 
-Results land in `results/`: `results.json` (canonical, with full metadata),
-`results.csv`, and the charts below. `--repeat 3` reports the median per metric
-and keeps each individual run in the JSON.
+That's it. Results appear in the `results/` folder: two charts (`.png`), the raw
+numbers (`results.json`), and a spreadsheet-friendly copy (`results.csv`).
 
-Useful flags: `--scenarios`, `--drivers`, `--workers 1,10,50,200`,
-`--concurrency-seconds`, `--point-iterations`, `--write-iterations`,
-`--replot results.json` (re-render charts only). Full list: `--help`.
+`--repeat 3` runs everything three times and reports the middle value, which
+avoids drawing conclusions from one noisy run.
 
-## Setup
+Want to change something? Try `--help`. Common ones:
 
-- SQL Server 2022 CU26 Developer in a container (32 vCPUs visible, 12.4 GB)
-- Client `python:3.12-slim` on the same host — Docker Desktop / WSL2
-- pyodbc 5.3.0 + `ODBC Driver 18`, mssql-python 1.14.0
-- `dbo.users`, 10 columns, 100k rows
+```bash
+docker compose run --rm --no-deps benchmark --scenarios concurrency --workers 1,10,50,200
+```
 
-Only APIs that exist on both drivers are compared, so the batch row is
-`executemany` (with pyodbc's `fast_executemany` enabled). mssql-python also ships
-`cursor.bulkcopy()`, faster than anything here, but pyodbc has no equivalent — it
-is deliberately out of scope rather than reported as a head-to-head win.
+## What gets measured
 
-## Results
+Four tests, both drivers, same database:
+
+1. **One row at a time** — `SELECT ... WHERE id = ?`, repeated 10,000 times.
+   Shows the fixed cost of a single query.
+2. **Many rows at once** — `SELECT TOP 100 / 1000 / 10000`, read completely.
+   Shows how fast each driver turns rows into Python objects.
+3. **Threads** — the same one-row query, run by 1 to 100 threads at the same
+   time. Shows what happens under load.
+4. **Writes** — INSERT, UPDATE and DELETE, 5,000 rows each. Run twice: once
+   committing every statement, once committing every 1,000.
+
+## The numbers
 
 Median of 3 runs.
 
 ![benchmark](results/benchmark-light.png)
 
-### Reads
+### Reading
 
-| Case | pyodbc | mssql-python | relative |
+| Test | pyodbc | mssql-python | winner |
 |---|---|---|---|
-| Point select | 5,694 qps · p95 0.228 ms | 3,887 qps · p95 0.327 ms | 0.68x |
-| TOP 100 | 197,559 rows/s | 177,999 rows/s | 0.90x |
-| TOP 1000 | 340,842 rows/s | 479,111 rows/s | **1.41x** |
-| TOP 10000 | 348,131 rows/s | 573,948 rows/s | **1.65x** |
-| 1 worker | 5,595 qps | 3,820 qps | 0.68x |
-| 10 workers | 1,345 qps | 6,957 qps | **5.17x** |
-| 100 workers | 1,314 qps · p95 90.6 ms | 6,709 qps · p95 45.2 ms | **5.11x** |
+| One row at a time | **5,694 queries/s** | 3,887 queries/s | pyodbc, 1.5x |
+| 100 rows | **197,559 rows/s** | 177,999 rows/s | pyodbc, 1.1x |
+| 1,000 rows | 340,842 rows/s | **479,111 rows/s** | mssql-python, 1.4x |
+| 10,000 rows | 348,131 rows/s | **573,948 rows/s** | mssql-python, 1.7x |
+| 1 thread | **5,595 queries/s** | 3,820 queries/s | pyodbc, 1.5x |
+| 10 threads | 1,345 queries/s | **6,957 queries/s** | mssql-python, 5.2x |
+| 100 threads | 1,314 queries/s | **6,709 queries/s** | mssql-python, 5.1x |
 
-### Writes (5,000 rows per phase, `rows/s`)
+### Writing (rows per second)
 
-| Operation | commit | pyodbc | mssql-python | relative |
+| Operation | commit every... | pyodbc | mssql-python | winner |
 |---|---|---|---|---|
-| INSERT row by row | autocommit | 802 | 812 | 1.01x |
-| INSERT executemany | autocommit | 1,013 | 1,038 | 1.02x |
-| UPDATE by id | autocommit | 813 | 878 | 1.08x |
-| DELETE by id | autocommit | 875 | 843 | 0.96x |
-| INSERT row by row | tx/1000 | 5,593 | 5,094 | 0.91x |
-| INSERT executemany | tx/1000 | **86,982** | 57,583 | 0.66x |
-| UPDATE by id | tx/1000 | 6,421 | 5,756 | 0.90x |
-| DELETE by id | tx/1000 | 6,739 | 6,065 | 0.90x |
+| INSERT, one row per statement | statement | 802 | 812 | tie |
+| INSERT, `executemany` | statement | 1,013 | 1,038 | tie |
+| UPDATE | statement | 813 | 878 | tie |
+| DELETE | statement | 875 | 843 | tie |
+| INSERT, one row per statement | 1,000 rows | **5,593** | 5,094 | pyodbc, 1.1x |
+| INSERT, `executemany` | 1,000 rows | **86,982** | 57,583 | pyodbc, 1.5x |
+| UPDATE | 1,000 rows | **6,421** | 5,756 | pyodbc, 1.1x |
+| DELETE | 1,000 rows | **6,739** | 6,065 | pyodbc, 1.1x |
 
-## Findings
+**About writes:** notice the top half of that table. When you commit after every
+statement, both drivers do about 800–1,000 rows/sec and the driver stops
+mattering — the database is waiting on its log file, not on Python. Commit in
+batches instead and the same work runs about 7x faster. If your writes are slow,
+this is worth checking before you change drivers.
 
-**Single-threaded small queries: pyodbc ahead** (~1.5x on the point select).
-The `TOP 100` margin is the least stable number here — separate runs put it at
-0.61x, 0.90x and 0.97x, so treat "pyodbc slightly ahead at 100 rows" as the
-finding and not the figure.
+## Why pyodbc slows down with threads
 
-**Large result sets: mssql-python ahead,** widening with size (1.41x at 1k,
-1.65x at 10k).
+We tested two explanations:
 
-**Writes: the commit dominates, not the driver.** Under autocommit everything
-converges to ~800–1,000 rows/s and differences fall inside the noise in both
-directions (0.96x–1.08x) — every statement pays a log flush. Under an explicit
-transaction the same load runs ~7x faster and pyodbc leads across the board, by
-1.51x on `executemany` (`fast_executemany` batches at the protocol level;
-mssql-python does not expose that attribute).
+- **Connection pooling?** No. pyodbc turns it on by default; turning it off
+  (`DB_PYODBC_POOLING=false`) changes nothing.
+- **Is the database the limit?** No. We ran two separate pyodbc processes with 10
+  threads each, at the same time. Each got ~1,200 queries/sec, so together
+  ~2,400 — double. The limit is inside each Python process, not in SQL Server.
 
-**Concurrency: not a comparison, a ceiling.** pyodbc gets *worse* under load —
-5,595 qps at 1 worker drops to ~1,345 qps from 10 workers onward, p95 growing
-linearly to 91 ms at 100. A flat plateau with linear latency is a serialization
-point, not server saturation: mssql-python sustains ~6,700–7,200 qps at every
-level against the same server.
+So the bottleneck is somewhere in pyodbc or in the ODBC layer under it. We think
+it is the shared ODBC environment handle and the lock around it, but we did not
+prove that — we only proved the limit is per process.
 
-We tested two explanations for the plateau:
+**What this means in practice:** pyodbc's advantage on single queries disappears
+as soon as your app uses threads. To scale pyodbc you need multiple processes.
 
-- **ODBC connection pooling** (`pyodbc.pooling`, on by default) — not the cause.
-  `DB_PYODBC_POOLING=false` leaves the plateau unchanged.
-- **Per process or server-side?** Two pyodbc containers with 10 threads each,
-  simultaneously: 1,186 + 1,258 ≈ 2,444 qps. Doubling processes roughly doubled
-  throughput, so the ceiling is **per process**, not SQL Server's.
+## Things to keep in mind
 
-Our hypothesis is the shared ODBC environment handle (pyodbc uses one `HENV` for
-all connections) plus the unixODBC lock around it, with the GIL pattern as a
-co-suspect — but that is a hypothesis, not a result. We did not instrument the
-driver.
+- The client and the database run on the **same machine**, so network delay is
+  near zero. This makes driver overhead look bigger than it would in production.
+  On a real network the two drivers would be closer. Benchmarks run against a
+  remote database (like Azure SQL) can reach different conclusions for this
+  reason, and that is not a contradiction.
+- SQL Server runs in Docker on Windows (WSL2), so the absolute numbers depend on
+  that. The comparison between the two drivers is the useful part, not the raw
+  values.
+- The "100 rows" result is the least stable one. Across runs we saw pyodbc ahead
+  by anywhere from 1.0x to 1.6x. Read it as "about the same", not as an exact
+  figure.
+- Only features that both drivers have are compared. mssql-python also has
+  `cursor.bulkcopy()`, which is faster than everything measured here, but pyodbc
+  has no equivalent, so including it would not be a fair comparison.
+- Three runs is better than one, but it is not a statistical study.
 
-Practical consequence for us: pyodbc's per-statement advantage stops mattering
-well before 10 threads.
+## Setup measured
 
-## Feedback we're looking for
+- SQL Server 2022 CU26 Developer, in a container
+- Client: `python:3.12-slim`, same host, Docker Desktop / WSL2
+- pyodbc 5.3.0 with `ODBC Driver 18`; mssql-python 1.14.0
+- One table, 10 columns, 100,000 rows
 
-1. **pyodbc under concurrency.** Is there a setting — per-connection `HENV`,
-   pooling, unixODBC threading level, `odbcinst.ini` — that removes the
-   ~1,300 qps per-process plateau? If so, the 5.17x is measuring our
-   configuration, not the driver.
-2. **mssql-python when single-threaded.** The point select came out at 0.68x. Is
-   there anything to enable (pooling, prepared statements, fetch buffers) that
-   improves the small-query path?
-3. **Scope of the batch comparison.** Is restricting it to `executemany` the
-   right call, or is leaving `bulkcopy()` out more misleading than including it?
-4. **Methodology.** ~0 latency amplifies driver overhead. Is a scenario with real
-   network latency more valuable than more iterations?
-
-Issues and PRs welcome. If you run this elsewhere, `results.json` carries the
-full metadata — opening an issue with your file is already a useful contribution.
-
-## Caveats
-
-- **Client and server on the same host:** latency is ~0, which amplifies driver
-  overhead. On a real network the numbers move closer together. This is the
-  biggest difference from benchmarks run against Azure SQL, where latency
-  dominates and conclusions can invert.
-- **Docker Desktop / WSL2:** SQL Server runs virtualized. The ratios between
-  drivers are more robust than the absolute values.
-- **Median of 3 runs.** Better than one, far from a confidence interval.
-- Every run overwrites `results/` — copy it first to keep a baseline.
-
-## License
-
-MIT.
+The exact environment of every run is saved inside `results.json`.
