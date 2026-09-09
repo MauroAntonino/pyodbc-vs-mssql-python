@@ -1,17 +1,21 @@
 # pyodbc vs mssql-python
 
+**The goal of this repository is to compare
+[pyodbc](https://github.com/mkleehammer/pyodbc) with
+[mssql-python](https://github.com/microsoft/mssql-python) — the two Python
+drivers for SQL Server — by measuring both under the same workloads, on the same
+database, in the same run.**
+
 ## Goal
 
-Compare **[pyodbc](https://github.com/mkleehammer/pyodbc)** — the long-standing
-ODBC driver for Python — against **[mssql-python](https://github.com/microsoft/mssql-python)**,
-Microsoft's newer driver for SQL Server, under the same workloads, on the same
-database, in the same run.
+pyodbc is the long-standing ODBC driver for Python; mssql-python is Microsoft's
+newer driver for SQL Server. Both do the same job: run SQL from Python against
+SQL Server.
 
-Both drivers do the same job: run SQL from Python against SQL Server. pyodbc goes
-through the ODBC Driver Manager and `msodbcsql18`; mssql-python ships its own
-client. The question this repository answers is a narrow one: **for a given kind
-of query, how many rows or queries per second does each one deliver, and at what
-latency?**
+They get there differently: pyodbc goes through the ODBC Driver Manager and
+`msodbcsql18`, while mssql-python ships its own client. The question answered
+here is a narrow one: **for a given kind of query, how many rows or queries per
+second does each one deliver, and at what latency?**
 
 Four workloads are measured, because the answer is not the same for all of them:
 one row at a time, many rows at once, many threads at once, and writes.
