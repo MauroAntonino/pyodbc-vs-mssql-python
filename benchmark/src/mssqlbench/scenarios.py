@@ -19,9 +19,7 @@ from .queries import (
     POINT_SELECT,
     TRUNCATE_WRITES,
     UPDATE_ROW,
-    WRITE_COLUMNS,
     WRITE_IDS,
-    WRITE_TABLE,
     result_set_query,
 )
 from .stats import Measurement
@@ -323,56 +321,6 @@ def _write_pass(driver: Driver, config: BenchmarkConfig, mode: str) -> list[dict
                 commit.tick()
 
             commit.flush()
-
-        # --- INSERT via the driver's native bulk path --------------------
-        # Not the same API on both sides: pyodbc has no bulk copy, so this row
-        # exists only for drivers that expose one. It is here so the batch
-        # comparison is each driver's *best* path, not only the shared one.
-        if hasattr(cursor, "bulkcopy"):
-            truncate()
-
-            payload = [_write_row(i) for i in range(rows)]
-
-            try:
-                measurement = Measurement()
-                start_total = time.perf_counter()
-
-                outcome = cursor.bulkcopy(
-                    WRITE_TABLE,
-                    payload,
-                    batch_size=batch_size,
-                    column_mappings=WRITE_COLUMNS,
-                )
-
-                elapsed = time.perf_counter() - start_total
-
-                commit.flush()
-
-                measurement.latencies_ms.append(elapsed * 1000)
-                measurement.wall_seconds = time.perf_counter() - start_total
-                measurement.operations = 1
-                measurement.rows = int(
-                    (outcome or {}).get("rows_copied", rows)
-                    if isinstance(outcome, dict)
-                    else rows
-                )
-
-                record(
-                    "INSERT bulkcopy",
-                    measurement,
-                    batch_size=batch_size,
-                    bulk_api="cursor.bulkcopy",
-                )
-            except Exception as exc:
-                print(f"  [{driver.name}] bulkcopy failed: {exc}")
-
-                truncate()
-
-                for i in range(rows):
-                    cursor.execute(INSERT_ROW, _write_row(i))
-                    commit.tick()
-
-                commit.flush()
 
         # --- UPDATE ------------------------------------------------------
         cursor.execute(WRITE_IDS)

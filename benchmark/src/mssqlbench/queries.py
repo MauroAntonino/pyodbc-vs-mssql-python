@@ -25,21 +25,6 @@ WRITE_TABLE = "dbo.users_writes"
 
 TRUNCATE_WRITES = f"TRUNCATE TABLE {WRITE_TABLE}"
 
-# The nine insertable columns, in the order _write_row() produces them. Needed
-# by bulk-copy APIs, which map by ordinal position and would otherwise try to
-# write the IDENTITY column.
-WRITE_COLUMNS = [
-    "username",
-    "email",
-    "first_name",
-    "last_name",
-    "age",
-    "country",
-    "balance",
-    "is_active",
-    "created_at",
-]
-
 WRITE_IDS = f"SELECT id FROM {WRITE_TABLE} ORDER BY id"
 
 INSERT_ROW = f"""
