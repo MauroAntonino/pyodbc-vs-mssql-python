@@ -310,6 +310,21 @@ def render(results: list[dict], output_dir: Path, theme_name: str = "light") -> 
                 r_label.split(" [")[0].replace(" ", "\n", 1) for r_label in labels
             ]
 
+<<<<<<< HEAD
+=======
+            # bulkcopy exists only on drivers that ship it, so its group has a
+            # single bar. Marked in the label rather than silently paired.
+            categories = [
+                f"{category}\n(driver-only)"
+                if any(
+                    r["label"] == label and r.get("bulk_api")
+                    for r in rows
+                )
+                else category
+                for category, label in zip(categories, labels)
+            ]
+
+>>>>>>> 457dadfb7dccac1633abd9745d5b5a7853abef11
             _grouped_bars(
                 axes[3][column],
                 theme,
