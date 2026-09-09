@@ -9,27 +9,6 @@ database, in the same run.**
 Four workloads are measured across four scenarios. Everything runs in Docker, so
 the numbers can be reproduced on another machine.
 
-## Goal
-
-pyodbc is the long-standing ODBC driver for Python; mssql-python is Microsoft's
-newer driver for SQL Server. Both do the same job: run SQL from Python against
-SQL Server.
-
-They get there differently: pyodbc goes through the ODBC Driver Manager and
-`msodbcsql18`, while mssql-python ships its own client. The question answered
-here is a narrow one: **for a given kind of query, how many rows or queries per
-second does each one deliver, and at what latency?**
-
-The four workloads are measured separately because the answer is not the same for
-all of them: one row at a time, many rows at once, many threads at once, and
-writes.
-
-What this is **not**: a verdict on which driver is better. Each scenario below
-states its configuration and its measurements, and says which driver came out
-better and worse **for that configuration**. Causes are deliberately not
-explained here — the open questions are collected at the end, to be raised with
-the driver maintainers.
-
 ## Environment
 
 Every value below was produced on this setup, recorded automatically in
@@ -225,38 +204,3 @@ is `executemany`. mssql-python also provides `cursor.bulkcopy()`, which is faste
 than anything on this page, and pyodbc has no equivalent.
 
 ---
-
-## Things that affect these numbers
-
-- **Client and database share one machine,** so network latency is close to zero.
-  Driver overhead therefore represents a larger share of each measurement than it
-  would across a network. Results measured against a remote database, such as
-  Azure SQL, are not directly comparable to these.
-- **SQL Server runs in Docker on WSL2,** not on bare metal, so absolute values
-  are specific to this setup.
-- **Three runs, median reported.** The individual runs are kept in
-  `results.json` under `repeats`.
-- **Server-side state is not reset between phases,** apart from the write table
-  being truncated: the buffer pool stays warm and the plan cache is primed on
-  purpose, since that is the steady state an application sees.
-
-## Open questions
-
-These are the points we want to raise with the driver maintainers rather than
-answer ourselves:
-
-1. **pyodbc with threads.** Is the flat throughput from 10 threads up expected,
-   and is there a configuration (per-connection environment handle, unixODBC
-   threading level, `odbcinst.ini` settings) that changes it? Pooling was ruled
-   out, and the two-process check indicates the limit is per process, but we did
-   not instrument the driver to find where.
-2. **mssql-python on single small queries.** Scenario 1 came out at 0.68x of
-   pyodbc. Is there anything to enable — pooling, prepared statements, fetch
-   buffer sizes — that applies to that path?
-3. **`executemany`.** The 1.51x difference with batched commits: is that the
-   expected gap between `fast_executemany` and mssql-python's `executemany`?
-4. **Scope.** Is restricting the comparison to shared APIs the right choice, or
-   is it more informative to show each driver's fastest bulk path?
-
-If you run this in another environment, `results.json` carries the full
-configuration and environment for the run.
