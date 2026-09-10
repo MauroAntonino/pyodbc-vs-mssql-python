@@ -205,9 +205,7 @@ than anything on this page, and pyodbc has no equivalent.
 
 ---
 
-## Scenario 5 — Single row: where the time goes
-
-Added to break scenario 1 into parts, after the question was raised upstream.
+## Scenario 5 — Single row: execute vs fetch
 
 **Configuration**
 
@@ -221,9 +219,6 @@ Added to break scenario 1 into parts, after the question was raised upstream.
 | Extra pass | the 10-column case repeated with the SQL text changed every iteration (a trailing `-- variant N` comment), so no two calls share statement text |
 | Row ids | identical random sequence for every pass and both drivers |
 | Runs | 3; median per metric |
-
-Two extra clock reads per iteration are added compared with scenario 1, so the
-totals here are not directly comparable to it.
 
 **Results — avg per call**
 
@@ -242,17 +237,18 @@ totals here are not directly comparable to it.
 
 ![profile](results/profile-light.png)
 
-**Where the difference sits:** in `execute()`. At 10 columns the total gap is
-0.0817 ms, of which `execute()` accounts for 0.0765 ms (94%) and `fetchone()`
-for 0.0053 ms (6%). `fetchone()` is 7% of total time for both drivers.
+**Better:** pyodbc at every column count — 1.30x at one column, 1.32x at two,
+1.36x at five, 1.48x at ten. With the SQL text rotating, the two measure the
+same (1.01x).
+**Worse:** mssql-python's `execute()` grows faster with the column count — it
+adds 0.0505 ms between 1 and 10 columns against 0.0118 ms for pyodbc, about
+5.6 µs versus 1.3 µs per extra column. The difference between the drivers sits
+in `execute()`: at 10 columns it accounts for 0.0765 ms of the 0.0817 ms total
+gap (94%), while `fetchone()` accounts for 0.0053 ms. `fetchone()` is about 7%
+of total time for both. pyodbc loses more when statement text stops repeating:
++72% on `execute()` against +12% for mssql-python.
 
-**Column count:** the gap is present at a single `INT` column (0.0378 ms) and
-roughly doubles by 10 columns (0.0765 ms). Between 1 and 10 columns,
-`execute()` grows by 0.0118 ms for pyodbc (+8%) and by 0.0505 ms for
-mssql-python (+28%) — about 1.3 µs versus 5.6 µs per additional column.
-
-**Rotating SQL text:** pyodbc's `execute()` rises from 0.1564 ms to 0.2686 ms
-(+72%); mssql-python's from 0.2329 ms to 0.2618 ms (+12%). With statement text
-never repeating, the two drivers measure the same (1.01x). Note that rotating
-the text also defeats the server-side plan cache, which applies to both drivers
-equally.
+Note on method: timing the two calls separately adds two clock reads per
+iteration, so these totals are not directly comparable to scenario 1. Rotating
+the SQL text also defeats the server-side plan cache, which applies to both
+drivers equally.
