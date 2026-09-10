@@ -6,8 +6,8 @@
 drivers for SQL Server — by measuring both under the same workloads, on the same
 database, in the same run.**
 
-Four workloads are measured across four scenarios. Everything runs in Docker, so
-the numbers can be reproduced on another machine.
+Five scenarios are measured. Everything runs in Docker, so the numbers can be
+reproduced on another machine.
 
 ## Environment
 
@@ -25,7 +25,7 @@ Every value below was produced on this setup, recorded automatically in
 | Table | `dbo.users`, 10 columns, 100,000 rows |
 | Runs | 3 full runs; every table reports the median per metric |
 
-All four scenarios select or write the same ten columns: `id`, `username`,
+Scenarios 1 to 4 select or write the same ten columns: `id`, `username`,
 `email`, `first_name`, `last_name`, `age`, `country`, `balance`, `is_active`,
 `created_at`.
 
