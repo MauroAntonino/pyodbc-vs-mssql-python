@@ -20,17 +20,10 @@ FROM dbo.users
 WHERE id = ?
 """
 
-
-WRITE_TABLE = "dbo.users_writes"
-
-TRUNCATE_WRITES = f"TRUNCATE TABLE {WRITE_TABLE}"
-
-<<<<<<< HEAD
-=======
-# The nine insertable columns, in the order _write_row() produces them. Needed
-# by bulk-copy APIs, which map by ordinal position and would otherwise try to
-# write the IDENTITY column.
-WRITE_COLUMNS = [
+# Same order as COLUMNS. Sliced by the profiling scenario to vary how many
+# columns a single row carries: index 0 alone is a bare INT.
+POINT_COLUMNS = [
+    "id",
     "username",
     "email",
     "first_name",
@@ -42,7 +35,25 @@ WRITE_COLUMNS = [
     "created_at",
 ]
 
->>>>>>> 457dadfb7dccac1633abd9745d5b5a7853abef11
+
+def point_select_query(columns: int, variant: int | None = None) -> str:
+    """Point select projecting the first `columns` columns.
+
+    `variant` appends a comment, which changes the SQL text without changing
+    the query. Used to check whether either driver benefits from seeing the
+    exact same statement text on every call.
+    """
+    selected = ", ".join(POINT_COLUMNS[:columns])
+
+    suffix = f" -- variant {variant}" if variant is not None else ""
+
+    return f"SELECT {selected} FROM dbo.users WHERE id = ?{suffix}"
+
+
+WRITE_TABLE = "dbo.users_writes"
+
+TRUNCATE_WRITES = f"TRUNCATE TABLE {WRITE_TABLE}"
+
 WRITE_IDS = f"SELECT id FROM {WRITE_TABLE} ORDER BY id"
 
 INSERT_ROW = f"""

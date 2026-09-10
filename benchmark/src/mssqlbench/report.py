@@ -27,7 +27,55 @@ SCENARIO_TITLES = {
     "result_set": "SCENARIO 2 - Result set (transport + materialization)",
     "concurrency": "SCENARIO 3 - Concurrency (point select, N workers)",
     "write_ops": "SCENARIO 4 - Writes (INSERT / UPDATE / DELETE)",
+    "single_row_profile": "SCENARIO 5 - Single row: execute vs fetch, by column count",
 }
+
+PROFILE_COLUMNS = [
+    ("driver", "Driver", 14, "s"),
+    ("label", "Case", 30, "s"),
+    ("execute_avg_ms", "exec avg", 11, ".4f"),
+    ("execute_p95_ms", "exec p95", 11, ".4f"),
+    ("fetch_avg_ms", "fetch avg", 11, ".4f"),
+    ("fetch_p95_ms", "fetch p95", 11, ".4f"),
+    ("avg_ms", "total avg", 11, ".4f"),
+    ("qps", "QPS", 11, ".0f"),
+]
+
+
+def print_profile(results: list[dict]) -> None:
+    """Dedicated table for scenario 5 - the split timings the main table omits."""
+    rows = [r for r in results if r["scenario"] == "single_row_profile"]
+
+    if not rows:
+        return
+
+    width = sum(w for _k, _h, w, _f in PROFILE_COLUMNS)
+
+    header = "".join(
+        f"{h:<{w}}" if f == "s" else f"{h:>{w}}"
+        for _k, h, w, f in PROFILE_COLUMNS
+    )
+
+    print()
+    print("=" * width)
+    print(SCENARIO_TITLES["single_row_profile"])
+    print("=" * width)
+    print(header)
+    print("-" * width)
+
+    # Grouped by case so the two drivers sit next to each other.
+    for label in dict.fromkeys(r["label"] for r in rows):
+        for row in [r for r in rows if r["label"] == label]:
+            print(
+                "".join(
+                    f"{str(row.get(k, '-')):<{w}}"
+                    if f == "s"
+                    else f"{row.get(k, float('nan')):>{w}{f}}"
+                    for k, _h, w, f in PROFILE_COLUMNS
+                )
+            )
+
+    print("=" * width)
 
 
 def _row_text(result: dict) -> str:

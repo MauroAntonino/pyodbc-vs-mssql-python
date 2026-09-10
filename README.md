@@ -6,8 +6,8 @@
 drivers for SQL Server — by measuring both under the same workloads, on the same
 database, in the same run.**
 
-Four workloads are measured across four scenarios. Everything runs in Docker, so
-the numbers can be reproduced on another machine.
+Five scenarios are measured. Everything runs in Docker, so the numbers can be
+reproduced on another machine.
 
 ## Environment
 
@@ -25,7 +25,7 @@ Every value below was produced on this setup, recorded automatically in
 | Table | `dbo.users`, 10 columns, 100,000 rows |
 | Runs | 3 full runs; every table reports the median per metric |
 
-All four scenarios select or write the same ten columns: `id`, `username`,
+Scenarios 1 to 4 select or write the same ten columns: `id`, `username`,
 `email`, `first_name`, `last_name`, `age`, `country`, `balance`, `is_active`,
 `created_at`.
 
@@ -204,3 +204,51 @@ is `executemany`. mssql-python also provides `cursor.bulkcopy()`, which is faste
 than anything on this page, and pyodbc has no equivalent.
 
 ---
+
+## Scenario 5 — Single row: execute vs fetch
+
+**Configuration**
+
+| | |
+|---|---|
+| Query | `SELECT <N columns> FROM dbo.users WHERE id = ?` |
+| Column counts (N) | 1 (`id` only), 2, 5, 10 |
+| Iterations | 10,000 per column count |
+| Connections | 1, reused; one cursor, reused |
+| Timing | `execute()` and `fetchone()` timed separately, per statement |
+| Extra pass | the 10-column case repeated with the SQL text changed every iteration (a trailing `-- variant N` comment), so no two calls share statement text |
+| Row ids | identical random sequence for every pass and both drivers |
+| Runs | 3; median per metric |
+
+**Results — avg per call**
+
+| Case | Driver | `execute()` | `fetchone()` | total | QPS |
+|---|---|---|---|---|---|
+| 1 col | pyodbc | 0.1446 ms | 0.0035 ms | 0.1481 ms | 6,699 |
+| 1 col | mssql-python | 0.1824 ms | 0.0102 ms | 0.1926 ms | 5,171 |
+| 2 col | pyodbc | 0.1454 ms | 0.0046 ms | 0.1500 ms | 6,613 |
+| 2 col | mssql-python | 0.1871 ms | 0.0111 ms | 0.1982 ms | 5,026 |
+| 5 col | pyodbc | 0.1495 ms | 0.0055 ms | 0.1550 ms | 6,403 |
+| 5 col | mssql-python | 0.1992 ms | 0.0119 ms | 0.2110 ms | 4,721 |
+| 10 col | pyodbc | 0.1564 ms | 0.0115 ms | 0.1680 ms | 5,915 |
+| 10 col | mssql-python | 0.2329 ms | 0.0168 ms | 0.2497 ms | 3,993 |
+| 10 col, rotating SQL text | pyodbc | 0.2686 ms | 0.0132 ms | 0.2817 ms | 3,512 |
+| 10 col, rotating SQL text | mssql-python | 0.2618 ms | 0.0174 ms | 0.2792 ms | 3,552 |
+
+![profile](results/profile-light.png)
+
+**Better:** pyodbc at every column count — 1.30x at one column, 1.32x at two,
+1.36x at five, 1.48x at ten. With the SQL text rotating, the two measure the
+same (1.01x).
+**Worse:** mssql-python's `execute()` grows faster with the column count — it
+adds 0.0505 ms between 1 and 10 columns against 0.0118 ms for pyodbc, about
+5.6 µs versus 1.3 µs per extra column. The difference between the drivers sits
+in `execute()`: at 10 columns it accounts for 0.0765 ms of the 0.0817 ms total
+gap (94%), while `fetchone()` accounts for 0.0053 ms. `fetchone()` is about 7%
+of total time for both. pyodbc loses more when statement text stops repeating:
++72% on `execute()` against +12% for mssql-python.
+
+Note on method: timing the two calls separately adds two clock reads per
+iteration, so these totals are not directly comparable to scenario 1. Rotating
+the SQL text also defeats the server-side plan cache, which applies to both
+drivers equally.

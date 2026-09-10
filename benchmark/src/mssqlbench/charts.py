@@ -310,21 +310,6 @@ def render(results: list[dict], output_dir: Path, theme_name: str = "light") -> 
                 r_label.split(" [")[0].replace(" ", "\n", 1) for r_label in labels
             ]
 
-<<<<<<< HEAD
-=======
-            # bulkcopy exists only on drivers that ship it, so its group has a
-            # single bar. Marked in the label rather than silently paired.
-            categories = [
-                f"{category}\n(driver-only)"
-                if any(
-                    r["label"] == label and r.get("bulk_api")
-                    for r in rows
-                )
-                else category
-                for category, label in zip(categories, labels)
-            ]
-
->>>>>>> 457dadfb7dccac1633abd9745d5b5a7853abef11
             _grouped_bars(
                 axes[3][column],
                 theme,
@@ -378,13 +363,101 @@ def render(results: list[dict], output_dir: Path, theme_name: str = "light") -> 
     return path
 
 
+def render_profile(
+    results: list[dict], output_dir: Path, theme_name: str = "light"
+) -> Path | None:
+    """Scenario 5 in its own figure: execute and fetch side by side.
+
+    Separate from the main chart because it answers a different question - not
+    "which driver is faster" but "which part of the call costs the time".
+    """
+    rows = [r for r in results if r["scenario"] == "single_row_profile"]
+
+    if not rows:
+        return None
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    theme = THEMES[theme_name]
+
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["font.sans-serif"] = FONT_STACK
+
+    labels = list(dict.fromkeys(r["label"] for r in rows))
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    fig.patch.set_facecolor(theme["surface"])
+
+    for ax, (field, title) in zip(
+        axes,
+        [
+            ("execute_avg_ms", "execute() - avg per call"),
+            ("fetch_avg_ms", "fetchone() - avg per call"),
+        ],
+    ):
+        _grouped_bars(
+            ax,
+            theme,
+            [label.replace(", ", "\n") for label in labels],
+            _by_driver(rows, labels, field),
+            title=title,
+            ylabel="milliseconds",
+            value_fmt="{:.4f}",
+            label_values=True,
+        )
+
+    handles, legend_labels = axes[0].get_legend_handles_labels()
+
+    if handles:
+        legend = fig.legend(
+            handles,
+            legend_labels,
+            loc="upper right",
+            ncols=len(handles),
+            frameon=False,
+            fontsize=10,
+            bbox_to_anchor=(0.98, 0.99),
+        )
+
+        for text in legend.get_texts():
+            text.set_color(theme["secondary"])
+
+    fig.suptitle(
+        "Single row: where the time goes",
+        color=theme["primary"],
+        fontsize=14,
+        x=0.02,
+        ha="left",
+        y=0.98,
+    )
+
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"profile-{theme_name}.png"
+
+    fig.savefig(path, dpi=140, facecolor=theme["surface"])
+    plt.close(fig)
+
+    return path
+
+
 def render_all(results: list[dict], output_dir: Path) -> list[Path]:
     paths = []
 
     for theme_name in THEMES:
-        path = render(results, output_dir, theme_name)
-
-        if path is not None:
-            paths.append(path)
+        for path in (
+            render(results, output_dir, theme_name),
+            render_profile(results, output_dir, theme_name),
+        ):
+            if path is not None:
+                paths.append(path)
 
     return paths

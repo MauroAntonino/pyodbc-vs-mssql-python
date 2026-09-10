@@ -10,7 +10,13 @@ from .config import BenchmarkConfig
 from .drivers import Driver, build_drivers
 from .stats import median_of_runs
 
-SCENARIOS = ("point_select", "result_set", "concurrency", "write_ops")
+SCENARIOS = (
+    "point_select",
+    "result_set",
+    "concurrency",
+    "write_ops",
+    "single_row_profile",
+)
 
 
 def wait_for_database(driver: Driver, timeout: float = 120.0) -> None:
@@ -113,6 +119,12 @@ def run_once(
         for driver in drivers:
             results.extend(scenarios.write_ops(driver, config))
 
+    if "single_row_profile" in selected:
+        print("\n>>> Scenario 5: single row - execute vs fetch, by column count")
+
+        for driver in drivers:
+            results.extend(scenarios.single_row_profile(driver, config))
+
     return results
 
 
@@ -145,6 +157,7 @@ def run(
         print(f"\nReporting the median of {repeats} repeats.")
 
     report.print_tables(results)
+    report.print_profile(results)
     report.print_speedup(results, baseline=drivers[0].name)
 
     json_path = report.write_json(
