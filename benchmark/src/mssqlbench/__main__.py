@@ -28,6 +28,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"comma-separated subset of: {', '.join(SCENARIOS)}",
     )
     parser.add_argument("--point-iterations", type=int, default=None)
+    parser.add_argument("--profile-iterations", type=int, default=None)
+    parser.add_argument(
+        "--profile-columns",
+        default=None,
+        help="column counts for the single-row profile, e.g. 1,2,5,10",
+    )
     parser.add_argument("--write-iterations", type=int, default=None)
     parser.add_argument(
         "--write-batch-size",
@@ -84,6 +90,14 @@ def main(argv: list[str] | None = None) -> None:
     if args.point_iterations:
         overrides["point_iterations"] = args.point_iterations
 
+    if args.profile_iterations:
+        overrides["profile_iterations"] = args.profile_iterations
+
+    if args.profile_columns:
+        overrides["profile_column_counts"] = [
+            int(x) for x in args.profile_columns.replace(" ", "").split(",") if x
+        ]
+
     if args.write_iterations:
         overrides["write_iterations"] = args.write_iterations
 
@@ -126,6 +140,7 @@ def main(argv: list[str] | None = None) -> None:
         results = payload["results"]
 
         report.print_tables(results)
+        report.print_profile(results)
 
         for path in charts.render_all(results, config.output_dir):
             print(f"PNG:  {path}")

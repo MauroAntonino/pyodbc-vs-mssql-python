@@ -69,6 +69,14 @@ class BenchmarkConfig:
         ]
     )
 
+    # Scenario 5 - single-row profiling: execute vs fetch, by column count.
+    profile_iterations: int = _int_env("BENCH_PROFILE_ITERATIONS", 10_000)
+    profile_column_counts: list[int] = field(
+        default_factory=lambda: _int_list_env(
+            "BENCH_PROFILE_COLUMNS", [1, 2, 5, 10]
+        )
+    )
+
     # Scenario 3 - concurrency.
     worker_levels: list[int] = field(
         default_factory=lambda: _int_list_env(

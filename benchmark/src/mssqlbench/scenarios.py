@@ -1,4 +1,4 @@
-"""The three benchmark scenarios.
+"""The benchmark scenarios.
 
 Every scenario returns a flat list of result dicts so the report and chart
 layers never need to know how a number was produced.
@@ -7,6 +7,7 @@ layers never need to know how a number was produced.
 from __future__ import annotations
 
 import random
+import statistics
 import threading
 import time
 from datetime import datetime, timezone
@@ -19,16 +20,11 @@ from .queries import (
     POINT_SELECT,
     TRUNCATE_WRITES,
     UPDATE_ROW,
-<<<<<<< HEAD
     WRITE_IDS,
-=======
-    WRITE_COLUMNS,
-    WRITE_IDS,
-    WRITE_TABLE,
->>>>>>> 457dadfb7dccac1633abd9745d5b5a7853abef11
+    point_select_query,
     result_set_query,
 )
-from .stats import Measurement
+from .stats import Measurement, percentile
 
 
 def _warmup(cursor, iterations: int, table_rows: int) -> None:
@@ -149,6 +145,134 @@ def result_set(driver: Driver, config: BenchmarkConfig) -> list[dict]:
 
     return results
 
+
+def _profile_loop(cursor, query_for, ids) -> tuple[list[float], list[float], float]:
+    """Run the point-select loop, timing execute() and fetchone() separately.
+
+    Returns (execute_ms, fetch_ms, wall_seconds). Two extra clock reads per
+    iteration are added compared with scenario 1; at ~0.2 ms per query their
+    cost is far below the difference being measured, but it does mean the
+    totals here are not directly comparable to scenario 1's.
+    """
+    execute_ms: list[float] = []
+    fetch_ms: list[float] = []
+
+    start_total = time.perf_counter()
+
+    for index, user_id in enumerate(ids):
+        query = query_for(index)
+
+        t0 = time.perf_counter()
+        cursor.execute(query, (user_id,))
+        t1 = time.perf_counter()
+        cursor.fetchone()
+        t2 = time.perf_counter()
+
+        execute_ms.append((t1 - t0) * 1000)
+        fetch_ms.append((t2 - t1) * 1000)
+
+    return execute_ms, fetch_ms, time.perf_counter() - start_total
+
+
+def single_row_profile(driver: Driver, config: BenchmarkConfig) -> list[dict]:
+    """Scenario 5 - where the time goes on a single-row select.
+
+    Two questions, both raised in the upstream discussion:
+
+    1. Is the cost in `execute()` or in `fetchone()`? Each is timed on its own.
+    2. Does it scale with the number of columns? The same query is run
+       projecting 1, 2, 5 and 10 columns. A gap that grows with the column
+       count points at per-column conversion or description handling; a gap
+       already present with a single INT points at fixed per-call cost.
+
+    A third pass repeats the 10-column case with the SQL text changing on every
+    iteration, which checks whether either driver relies on seeing identical
+    statement text to reuse a prepared statement.
+    """
+    results: list[dict] = []
+
+    iterations = config.profile_iterations
+
+    conn = driver.connect()
+    cursor = conn.cursor()
+
+    def record(label: str, columns: int, sql_text: str, execute_ms, fetch_ms, wall) -> None:
+        total = Measurement(
+            latencies_ms=[e + f for e, f in zip(execute_ms, fetch_ms)],
+            wall_seconds=wall,
+            operations=len(execute_ms),
+            rows=len(execute_ms),
+        )
+
+        summary = total.summary()
+
+        results.append(
+            {
+                "scenario": "single_row_profile",
+                "driver": driver.name,
+                "label": label,
+                "columns": columns,
+                "sql_text": sql_text,
+                "batch_size": 1,
+                "workers": 1,
+                "execute_avg_ms": statistics.mean(execute_ms),
+                "execute_p50_ms": percentile(execute_ms, 50),
+                "execute_p95_ms": percentile(execute_ms, 95),
+                "fetch_avg_ms": statistics.mean(fetch_ms),
+                "fetch_p50_ms": percentile(fetch_ms, 50),
+                "fetch_p95_ms": percentile(fetch_ms, 95),
+                **summary,
+            }
+        )
+
+        print(
+            f"  [{driver.name}] {label:<28} "
+            f"execute {statistics.mean(execute_ms):>7.4f} ms  "
+            f"fetch {statistics.mean(fetch_ms):>7.4f} ms  "
+            f"total {summary['avg_ms']:>7.4f} ms"
+        )
+
+    try:
+        _warmup(cursor, config.warmup_iterations, config.table_rows)
+
+        # Same id sequence for every column count and both drivers.
+        rng = random.Random(1234)
+        ids = [rng.randrange(1, config.table_rows + 1) for _ in range(iterations)]
+
+        for columns in config.profile_column_counts:
+            query = point_select_query(columns)
+
+            # Prime the plan cache for this projection.
+            cursor.execute(query, (ids[0],))
+            cursor.fetchone()
+
+            execute_ms, fetch_ms, wall = _profile_loop(
+                cursor, lambda _index: query, ids
+            )
+
+            record(f"{columns} col", columns, "fixed", execute_ms, fetch_ms, wall)
+
+        # Statement-text reuse check: same query, different text every call.
+        columns = max(config.profile_column_counts)
+
+        execute_ms, fetch_ms, wall = _profile_loop(
+            cursor,
+            lambda index: point_select_query(columns, variant=index),
+            ids,
+        )
+
+        record(
+            f"{columns} col, rotating SQL text",
+            columns,
+            "rotating",
+            execute_ms,
+            fetch_ms,
+            wall,
+        )
+    finally:
+        conn.close()
+
+    return results
 
 def _write_row(index: int) -> tuple:
     return (
@@ -328,59 +452,6 @@ def _write_pass(driver: Driver, config: BenchmarkConfig, mode: str) -> list[dict
 
             commit.flush()
 
-<<<<<<< HEAD
-=======
-        # --- INSERT via the driver's native bulk path --------------------
-        # Not the same API on both sides: pyodbc has no bulk copy, so this row
-        # exists only for drivers that expose one. It is here so the batch
-        # comparison is each driver's *best* path, not only the shared one.
-        if hasattr(cursor, "bulkcopy"):
-            truncate()
-
-            payload = [_write_row(i) for i in range(rows)]
-
-            try:
-                measurement = Measurement()
-                start_total = time.perf_counter()
-
-                outcome = cursor.bulkcopy(
-                    WRITE_TABLE,
-                    payload,
-                    batch_size=batch_size,
-                    column_mappings=WRITE_COLUMNS,
-                )
-
-                elapsed = time.perf_counter() - start_total
-
-                commit.flush()
-
-                measurement.latencies_ms.append(elapsed * 1000)
-                measurement.wall_seconds = time.perf_counter() - start_total
-                measurement.operations = 1
-                measurement.rows = int(
-                    (outcome or {}).get("rows_copied", rows)
-                    if isinstance(outcome, dict)
-                    else rows
-                )
-
-                record(
-                    "INSERT bulkcopy",
-                    measurement,
-                    batch_size=batch_size,
-                    bulk_api="cursor.bulkcopy",
-                )
-            except Exception as exc:
-                print(f"  [{driver.name}] bulkcopy failed: {exc}")
-
-                truncate()
-
-                for i in range(rows):
-                    cursor.execute(INSERT_ROW, _write_row(i))
-                    commit.tick()
-
-                commit.flush()
-
->>>>>>> 457dadfb7dccac1633abd9745d5b5a7853abef11
         # --- UPDATE ------------------------------------------------------
         cursor.execute(WRITE_IDS)
         ids = [row[0] for row in cursor.fetchall()]
